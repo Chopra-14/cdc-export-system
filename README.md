@@ -134,7 +134,7 @@ docker-compose exec app pytest --cov=app
 
 ### Current coverage:
 
-TOTAL: 74%
+TOTAL: 90%
 ### 🛠 Environment Variables
 
 See .env.example:
