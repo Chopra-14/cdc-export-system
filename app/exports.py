@@ -3,14 +3,13 @@ def run_export(consumer_id, export_type, job_id):
         "event": "export_started",
         "jobId": job_id,
         "consumerId": consumer_id,
-        "type": export_type
+        "exportType": export_type
     })
 
     conn = get_db()
     cur = conn.cursor()
 
     try:
-        # Get existing watermark
         cur.execute(
             "SELECT last_exported_at FROM watermarks WHERE consumer_id=%s",
             (consumer_id,)
@@ -35,7 +34,6 @@ def run_export(consumer_id, export_type, job_id):
 
         max_updated = watermark
 
-        # Write CSV first (NO watermark update yet)
         with open(path, "w", newline="") as f:
             writer = csv.writer(f)
 
@@ -53,44 +51,28 @@ def run_export(consumer_id, export_type, job_id):
                     else:
                         op = "UPDATE"
 
-                    writer.writerow([
-                        op,
-                        r["id"],
-                        r["name"],
-                        r["email"],
-                        r["created_at"],
-                        r["updated_at"],
-                        r["is_deleted"]
-                    ])
+                    writer.writerow([op,r["id"],r["name"],r["email"],r["created_at"],r["updated_at"],r["is_deleted"]])
                 else:
-                    writer.writerow([
-                        r["id"],
-                        r["name"],
-                        r["email"],
-                        r["created_at"],
-                        r["updated_at"],
-                        r["is_deleted"]
-                    ])
+                    writer.writerow([r["id"],r["name"],r["email"],r["created_at"],r["updated_at"],r["is_deleted"]])
 
                 if not max_updated or r["updated_at"] > max_updated:
                     max_updated = r["updated_at"]
 
-        # Only update watermark AFTER successful file write
         if rows and max_updated:
             cur.execute("""
                 INSERT INTO watermarks(consumer_id,last_exported_at,updated_at)
                 VALUES(%s,%s,NOW())
                 ON CONFLICT (consumer_id)
-                DO UPDATE SET
-                    last_exported_at=EXCLUDED.last_exported_at,
-                    updated_at=NOW()
-            """, (consumer_id, max_updated))
+                DO UPDATE SET last_exported_at=EXCLUDED.last_exported_at, updated_at=NOW()
+            """,(consumer_id,max_updated))
 
         conn.commit()
 
         logging.info({
             "event": "export_completed",
             "jobId": job_id,
+            "consumerId": consumer_id,
+            "exportType": export_type,
             "rowsExported": len(rows)
         })
 
@@ -99,6 +81,8 @@ def run_export(consumer_id, export_type, job_id):
         logging.error({
             "event": "export_failed",
             "jobId": job_id,
+            "consumerId": consumer_id,
+            "exportType": export_type,
             "error": str(e)
         })
 
