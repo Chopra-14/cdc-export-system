@@ -4,6 +4,9 @@ import logging
 from datetime import datetime
 from app.database import get_db
 
+OUTPUT_DIR = "output"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 def run_export(consumer_id, export_type, job_id):
     logging.info({
         "event": "export_started",
