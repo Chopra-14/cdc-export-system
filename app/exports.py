@@ -3,11 +3,13 @@ import os
 import logging
 from datetime import datetime
 from app.database import get_db
+from psycopg2.extras import RealDictCursor
 
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def run_export(consumer_id, export_type, job_id):
+
     logging.info({
         "event": "export_started",
         "jobId": job_id,
@@ -16,9 +18,10 @@ def run_export(consumer_id, export_type, job_id):
     })
 
     conn = get_db()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
+        # Get watermark
         cur.execute(
             "SELECT last_exported_at FROM watermarks WHERE consumer_id=%s",
             (consumer_id,)
@@ -26,13 +29,14 @@ def run_export(consumer_id, export_type, job_id):
         row = cur.fetchone()
         watermark = row["last_exported_at"] if row else None
 
+        # Build query
         if export_type == "full":
             query = "SELECT * FROM users WHERE is_deleted=false"
             params = ()
         else:
             if not watermark:
                 watermark = datetime(1970, 1, 1)
-            query = "SELECT * FROM users WHERE updated_at>%s"
+            query = "SELECT * FROM users WHERE updated_at > %s"
             params = (watermark,)
 
         cur.execute(query, params)
@@ -52,6 +56,7 @@ def run_export(consumer_id, export_type, job_id):
                 writer.writerow(["id","name","email","created_at","updated_at","is_deleted"])
 
             for r in rows:
+
                 if export_type == "delta":
                     if r["is_deleted"]:
                         op = "DELETE"
@@ -60,19 +65,36 @@ def run_export(consumer_id, export_type, job_id):
                     else:
                         op = "UPDATE"
 
-                    writer.writerow([op,r["id"],r["name"],r["email"],r["created_at"],r["updated_at"],r["is_deleted"]])
+                    writer.writerow([
+                        op,
+                        r["id"],
+                        r["name"],
+                        r["email"],
+                        r["created_at"],
+                        r["updated_at"],
+                        r["is_deleted"]
+                    ])
                 else:
-                    writer.writerow([r["id"],r["name"],r["email"],r["created_at"],r["updated_at"],r["is_deleted"]])
+                    writer.writerow([
+                        r["id"],
+                        r["name"],
+                        r["email"],
+                        r["created_at"],
+                        r["updated_at"],
+                        r["is_deleted"]
+                    ])
 
                 if not max_updated or r["updated_at"] > max_updated:
                     max_updated = r["updated_at"]
 
+        # Update watermark
         if rows and max_updated:
             cur.execute("""
                 INSERT INTO watermarks(consumer_id,last_exported_at,updated_at)
                 VALUES(%s,%s,NOW())
                 ON CONFLICT (consumer_id)
-                DO UPDATE SET last_exported_at=EXCLUDED.last_exported_at, updated_at=NOW()
+                DO UPDATE SET last_exported_at=EXCLUDED.last_exported_at,
+                              updated_at=NOW()
             """,(consumer_id,max_updated))
 
         conn.commit()
@@ -86,7 +108,6 @@ def run_export(consumer_id, export_type, job_id):
         })
 
     except Exception as e:
-        conn.rollback()
         logging.error({
             "event": "export_failed",
             "jobId": job_id,
@@ -94,6 +115,7 @@ def run_export(consumer_id, export_type, job_id):
             "exportType": export_type,
             "error": str(e)
         })
+        raise
 
     finally:
         cur.close()

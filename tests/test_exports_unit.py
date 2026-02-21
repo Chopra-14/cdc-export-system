@@ -29,7 +29,7 @@ class DummyCursor:
 
 
 class DummyConn:
-    def cursor(self):
+    def cursor(self, *args, **kwargs):
         return DummyCursor()
 
     def commit(self):

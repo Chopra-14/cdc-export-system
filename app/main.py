@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, Header, HTTPException, Request
 from datetime import datetime
 import uuid
 from app.database import get_db
@@ -46,25 +46,31 @@ def delta_export(background_tasks: BackgroundTasks, x_consumer_id: str = Header(
         "outputFilename": f"delta_{x_consumer_id}_{job_id}.csv"
     }
 
+from fastapi import Request
+
 @app.get("/exports/watermark")
-def get_watermark(x_consumer_id: str = Header(...)):
+def get_watermark(request: Request):
+    consumer_id = request.headers.get("X-Consumer-ID")
+
+    if not consumer_id:
+        raise HTTPException(status_code=400, detail="X-Consumer-ID required")
+
     conn = get_db()
     cur = conn.cursor()
 
     cur.execute(
         "SELECT last_exported_at FROM watermarks WHERE consumer_id=%s",
-        (x_consumer_id,)
+        (consumer_id,)
     )
 
     row = cur.fetchone()
 
-    cur.close()
-    conn.close()
-
     if not row:
-        raise HTTPException(status_code=404, detail="No watermark found")
+        raise HTTPException(status_code=404, detail="Watermark not found")
+
+    last = row[0] if isinstance(row, tuple) else row["last_exported_at"]
 
     return {
-        "consumerId": x_consumer_id,
-        "lastExportedAt": row["last_exported_at"]
+        "consumerId": consumer_id,
+        "lastExportedAt": last.isoformat() if last else None
     }
